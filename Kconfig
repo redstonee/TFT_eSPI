@@ -226,9 +226,12 @@ menu "TFT_eSPI"
                 not accessible (e.g. TTGO T-Beam) then use the HSPI port for the
                 TFT display.
             config TFT_VSPI_PORT
-                bool "VSPI (SPI2)"
+                bool "VSPI"
             config TFT_HSPI_PORT
-                bool "HSPI (SPI3)"
+                bool "HSPI"
+            config TFT_SPI3
+                bool "SPI3"
+
         endchoice
 
         config TFT_MISO
@@ -299,7 +302,7 @@ menu "TFT_eSPI"
         config TFT_DC
             int "TFT Data/Command pin"
             default -1
-            range -1 31
+            range -1 45
             help
                 Labelled as DC or RS (Register Select) in some displays
     

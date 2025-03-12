@@ -21,6 +21,8 @@
       SPIClass spi = SPIClass(HSPI);
     #elif defined(USE_FSPI_PORT)
       SPIClass spi = SPIClass(FSPI);
+    #elif defined(USE_SPI3_PORT)
+      SPIClass spi = SPIClass(SPI3);
     #else // use FSPI port
       SPIClass& spi = SPI;
     #endif

@@ -239,6 +239,10 @@
         #define USE_HSPI_PORT
     #endif
 
+    #if CONFIG_TFT_SPI3_PORT
+        #define USE_SPI3_PORT
+    #endif
+
     #if CONFIG_TFT_MISO != -1
         #define TFT_MISO      CONFIG_TFT_MISO
     #endif
