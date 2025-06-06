@@ -2,21 +2,55 @@
         // TFT_eSPI driver functions for ESP32 processors //
         ////////////////////////////////////////////////////
 
+// Temporarily a separate file to TFT_eSPI_ESP32.c until board package low level API stabilises
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // Global variables
 ////////////////////////////////////////////////////////////////////////////////////////
 
 // Select the SPI port to use, ESP32 has 2 options
 #if !defined (TFT_PARALLEL_8_BIT)
-  SPIClass& spi = SPI;
+  #ifdef CONFIG_IDF_TARGET_ESP32
+    #ifdef USE_HSPI_PORT
+      SPIClass spi = SPIClass(HSPI);
+    #elif defined(USE_FSPI_PORT)
+      SPIClass spi = SPIClass(FSPI);
+    #else // use default VSPI port
+      SPIClass spi = SPIClass(VSPI);
+    #endif
+  #else
+    #ifdef USE_HSPI_PORT
+      SPIClass spi = SPIClass(HSPI);
+    #elif defined(USE_FSPI_PORT)
+      SPIClass spi = SPIClass(FSPI);
+    #else // use FSPI port
+      SPIClass& spi = SPI;
+    #endif
+  #endif
 #endif
 
 #ifdef ESP32_DMA
   // DMA SPA handle
   spi_device_handle_t dmaHAL;
-      #define DMA_CHANNEL SPI_DMA_CH_AUTO
-      spi_host_device_t spi_host = (spi_host_device_t) SPI2_HOST; // Draws once then freezes
-#endif // ESP32_DMA
+  #ifdef CONFIG_IDF_TARGET_ESP32
+    #define DMA_CHANNEL 1
+    #ifdef USE_HSPI_PORT
+      spi_host_device_t spi_host = HSPI_HOST;
+    #elif defined(USE_FSPI_PORT)
+      spi_host_device_t spi_host = SPI_HOST;
+    #else // use VSPI port
+      spi_host_device_t spi_host = VSPI_HOST;
+    #endif
+  #else
+    #ifdef USE_HSPI_PORT
+      #define DMA_CHANNEL 2
+      spi_host_device_t spi_host = (spi_host_device_t) DMA_CHANNEL; // Draws once then freezes
+    #else // use FSPI port
+      #define DMA_CHANNEL 1
+      spi_host_device_t spi_host = (spi_host_device_t) DMA_CHANNEL; // Draws once then freezes
+    #endif
+  #endif
+#endif
 
 #if !defined (TFT_PARALLEL_8_BIT)
   // Volatile for register reads:
@@ -32,35 +66,26 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 
 /***************************************************************************************
-** Function name:           beginSDA - VSPI port only, FPSI port only for S2
+** Function name:           beginSDA - FPSI port only
 ** Description:             Detach MOSI and attach MISO to SDA for reads
 ***************************************************************************************/
 void TFT_eSPI::begin_SDA_Read(void)
 {
   gpio_set_direction((gpio_num_t)TFT_MOSI, GPIO_MODE_INPUT);
-  #ifdef CONFIG_IDF_TARGET_ESP32
-    pinMatrixInAttach(TFT_MOSI, VSPIQ_IN_IDX, false);
-  #else // S2
-    pinMatrixInAttach(TFT_MOSI, FSPIQ_IN_IDX, false);
-  #endif
+  pinMatrixInAttach(TFT_MOSI, FSPIQ_IN_IDX, false);
   SET_BUS_READ_MODE;
 }
 
 /***************************************************************************************
-** Function name:           endSDA - VSPI port only, FPSI port only for S2
+** Function name:           endSDA - FPSI port only
 ** Description:             Attach MOSI to SDA and detach MISO for writes
 ***************************************************************************************/
 void TFT_eSPI::end_SDA_Read(void)
 {
   gpio_set_direction((gpio_num_t)TFT_MOSI, GPIO_MODE_OUTPUT);
-  #ifdef CONFIG_IDF_TARGET_ESP32
-    pinMatrixOutAttach(TFT_MOSI, VSPID_OUT_IDX, false, false);
-  #else // S2
-    pinMatrixOutAttach(TFT_MOSI, FSPID_OUT_IDX, false, false);
-  #endif
+  pinMatrixOutAttach(TFT_MOSI, FSPID_OUT_IDX, false, false);
   SET_BUS_WRITE_MODE;
 }
-
 ////////////////////////////////////////////////////////////////////////////////////////
 #endif // #if defined (TFT_SDA_READ)
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -234,6 +259,10 @@ void TFT_eSPI::pushBlock(uint16_t color, uint32_t len){
     while (*_spi_cmd&SPI_USR);
     for (i=0; i < rem; i+=2) *spi_w++ = color32;
     *_spi_mosi_dlen = (rem << 4) - 1;
+#if CONFIG_IDF_TARGET_ESP32H2
+    *_spi_cmd = SPI_UPDATE;
+    while (*_spi_cmd & SPI_UPDATE);
+#endif
     *_spi_cmd = SPI_USR;
     if (!len) return; //{while (*_spi_cmd&SPI_USR); return; }
     i = i>>1; while(i++<16) *spi_w++ = color32;
@@ -247,6 +276,10 @@ void TFT_eSPI::pushBlock(uint16_t color, uint32_t len){
   while(len)
   {
     while (*_spi_cmd&SPI_USR);
+#if CONFIG_IDF_TARGET_ESP32H2
+    *_spi_cmd = SPI_UPDATE;
+    while (*_spi_cmd & SPI_UPDATE);
+#endif
     *_spi_cmd = SPI_USR;
     len -= 32;
   }
@@ -292,6 +325,10 @@ void TFT_eSPI::pushSwapBytePixels(const void* data_in, uint32_t len){
       WRITE_PERI_REG(SPI_W13_REG(SPI_PORT), color[13]);
       WRITE_PERI_REG(SPI_W14_REG(SPI_PORT), color[14]);
       WRITE_PERI_REG(SPI_W15_REG(SPI_PORT), color[15]);
+#if CONFIG_IDF_TARGET_ESP32H2
+      SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_UPDATE);
+      while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_UPDATE);
+#endif
       SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_USR);
       len -= 32;
     }
@@ -315,6 +352,10 @@ void TFT_eSPI::pushSwapBytePixels(const void* data_in, uint32_t len){
     WRITE_PERI_REG(SPI_W5_REG(SPI_PORT),  color[5]);
     WRITE_PERI_REG(SPI_W6_REG(SPI_PORT),  color[6]);
     WRITE_PERI_REG(SPI_W7_REG(SPI_PORT),  color[7]);
+#if CONFIG_IDF_TARGET_ESP32H2
+    SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_UPDATE);
+    while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_UPDATE);
+#endif
     SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_USR);
     len -= 16;
   }
@@ -326,6 +367,10 @@ void TFT_eSPI::pushSwapBytePixels(const void* data_in, uint32_t len){
     for (uint32_t i=0; i <= (len<<1); i+=4) {
       WRITE_PERI_REG(SPI_W0_REG(SPI_PORT)+i, DAT8TO32(data)); data+=4;
     }
+#if  CONFIG_IDF_TARGET_ESP32H2
+    SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_UPDATE);
+    while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_UPDATE);
+#endif
     SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_USR);
   }
   while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_USR);
@@ -367,6 +412,10 @@ void TFT_eSPI::pushPixels(const void* data_in, uint32_t len){
       WRITE_PERI_REG(SPI_W13_REG(SPI_PORT), *data++);
       WRITE_PERI_REG(SPI_W14_REG(SPI_PORT), *data++);
       WRITE_PERI_REG(SPI_W15_REG(SPI_PORT), *data++);
+#if CONFIG_IDF_TARGET_ESP32H2
+      SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_UPDATE);
+      while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_UPDATE);
+#endif
       SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_USR);
       len -= 32;
     }
@@ -377,6 +426,10 @@ void TFT_eSPI::pushPixels(const void* data_in, uint32_t len){
     while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_USR);
     WRITE_PERI_REG(SPI_MOSI_DLEN_REG(SPI_PORT), (len << 4) - 1);
     for (uint32_t i=0; i <= (len<<1); i+=4) WRITE_PERI_REG((SPI_W0_REG(SPI_PORT) + i), *data++);
+#if CONFIG_IDF_TARGET_ESP32H2
+      SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_UPDATE);
+      while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_UPDATE);
+#endif
     SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_USR);
   }
   while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_USR);
@@ -403,7 +456,7 @@ void TFT_eSPI::pushBlock(uint16_t color, uint32_t len)
 
   if (len > 19)
   {
-    SET_PERI_REG_BITS(SPI_MOSI_DLEN_REG(SPI_PORT), SPI_USR_MOSI_DBITLEN, 479, SPI_USR_MOSI_DBITLEN_S);
+    WRITE_PERI_REG(SPI_MOSI_DLEN_REG(SPI_PORT), 479);
 
     while(len>19)
     {
@@ -423,6 +476,10 @@ void TFT_eSPI::pushBlock(uint16_t color, uint32_t len)
       WRITE_PERI_REG(SPI_W12_REG(SPI_PORT), r0);
       WRITE_PERI_REG(SPI_W13_REG(SPI_PORT), r1);
       WRITE_PERI_REG(SPI_W14_REG(SPI_PORT), r2);
+#if CONFIG_IDF_TARGET_ESP32H2
+      SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_UPDATE);
+      while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_UPDATE);
+#endif
       SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_USR);
       len -= 20;
     }
@@ -431,7 +488,7 @@ void TFT_eSPI::pushBlock(uint16_t color, uint32_t len)
 
   if (len)
   {
-    SET_PERI_REG_BITS(SPI_MOSI_DLEN_REG(SPI_PORT), SPI_USR_MOSI_DBITLEN, (len * 24) - 1, SPI_USR_MOSI_DBITLEN_S);
+    WRITE_PERI_REG(SPI_MOSI_DLEN_REG(SPI_PORT), (len * 24) - 1);
     WRITE_PERI_REG(SPI_W0_REG(SPI_PORT), r0);
     WRITE_PERI_REG(SPI_W1_REG(SPI_PORT), r1);
     WRITE_PERI_REG(SPI_W2_REG(SPI_PORT), r2);
@@ -450,7 +507,10 @@ void TFT_eSPI::pushBlock(uint16_t color, uint32_t len)
       WRITE_PERI_REG(SPI_W13_REG(SPI_PORT), r1);
       WRITE_PERI_REG(SPI_W14_REG(SPI_PORT), r2);
     }
-
+#if CONFIG_IDF_TARGET_ESP32H2
+    SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_UPDATE);
+    while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_UPDATE);
+#endif
     SET_PERI_REG_MASK(SPI_CMD_REG(SPI_PORT), SPI_USR);
     while (READ_PERI_REG(SPI_CMD_REG(SPI_PORT))&SPI_USR);
   }
@@ -488,11 +548,7 @@ void TFT_eSPI::pushSwapBytePixels(const void* data_in, uint32_t len){
 ** Description:             Write a block of pixels of the same colour
 ***************************************************************************************/
 void TFT_eSPI::pushBlock(uint16_t color, uint32_t len){
-  #if defined (SSD1963_DRIVER)
-  if ( ((color & 0xF800)>> 8) == ((color & 0x07E0)>> 3) && ((color & 0xF800)>> 8)== ((color & 0x001F)<< 3) )
-  #else
   if ( (color >> 8) == (color & 0x00FF) )
-  #endif
   { if (!len) return;
     tft_Write_16(color);
   #if defined (SSD1963_DRIVER)
@@ -736,17 +792,6 @@ void IRAM_ATTR dc_callback(spi_transaction_t *spi_tx)
 }
 
 /***************************************************************************************
-** Function name:           dma_end_callback
-** Description:             Clear DMA run flag to stop retransmission loop
-***************************************************************************************/
-extern "C" void dma_end_callback();
-
-void IRAM_ATTR dma_end_callback(spi_transaction_t *spi_tx)
-{
-  WRITE_PERI_REG(SPI_DMA_CONF_REG(spi_host), 0);
-}
-
-/***************************************************************************************
 ** Function name:           initDMA
 ** Description:             Initialise the DMA engine - returns true if init OK
 ***************************************************************************************/
@@ -761,12 +806,10 @@ bool TFT_eSPI::initDMA(bool ctrl_cs)
     .sclk_io_num = TFT_SCLK,
     .quadwp_io_num = -1,
     .quadhd_io_num = -1,
-    #ifdef xCONFIG_IDF_TARGET_ESP32S2
-      .data4_io_num = -1,
-      .data5_io_num = -1,
-      .data6_io_num = -1,
-      .data7_io_num = -1,
-    #endif
+    .data4_io_num = -1,
+    .data5_io_num = -1,
+    .data6_io_num = -1,
+    .data7_io_num = -1,
     .max_transfer_sz = TFT_WIDTH * TFT_HEIGHT * 2 + 8, // TFT screen size
     .flags = 0,
     .intr_flags = 0
@@ -789,11 +832,7 @@ bool TFT_eSPI::initDMA(bool ctrl_cs)
     .flags = SPI_DEVICE_NO_DUMMY, //0,
     .queue_size = 1,
     .pre_cb = 0, //dc_callback, //Callback to handle D/C line
-    #ifdef CONFIG_IDF_TARGET_ESP32
-      .post_cb = 0
-    #else
-      .post_cb = dma_end_callback
-    #endif
+    .post_cb = 0
   };
   ret = spi_bus_initialize(spi_host, &buscfg, DMA_CHANNEL);
   ESP_ERROR_CHECK(ret);
